@@ -1,0 +1,36 @@
+{
+  "name": "yapify_backend",
+  "version": "1.0.0",
+  "description": "This is the whatsapp clone",
+  "homepage": "https://github.com/Ankit-Silwal/yapify_backend#readme",
+  "bugs": {
+    "url": "https://github.com/Ankit-Silwal/yapify_backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ankit-Silwal/yapify_backend.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ext ts --exec ts-node --esm index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.3",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
