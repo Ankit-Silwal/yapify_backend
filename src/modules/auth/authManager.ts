@@ -5,6 +5,7 @@ import { checkStrongPassword } from "../../utils/strongpassword.js";
 import { createSession } from "./sessionManager.js";
 import { sendRegisterMail, forgotPasswordMail } from "./sendingOtp.js";
 import { generateAndStoreForgotPasswordOtp, generateAndStoreOtp, verifyAndConsumeForgotPasswordOtp, verifyAndConsumeOtp } from "./otpManager.js";
+import REDIS_CLIENT from "../../config/redis.js";
 
 type checkPasswordResult = {
   isStrong: boolean;
@@ -207,12 +208,20 @@ export async function changePassword(
       message:"Current password didn't match"
     })
   }
+  const check=checkStrongPassword(password)
+  if(!check.isStrong){
+    return res.status(400).json({
+      success:false,
+      message:"Please put a stronger password sir"
+    })
+  }
+  const hashedPassword=await bcrypt.hash(password,10)
   await pool.query(
     `UPDATE users
     SET password_hash=$1,
     updated_at=NOW()
     WHERE id=$2`,
-    [password,userId]
+    [hashedPassword,userId]
   )
   return res.status(200).json({
     success: true,
@@ -264,9 +273,54 @@ export const verifyForgotPassword=async (req:Request,res:Response):Promise<Respo
       message:response.message
     })
   }
+  const key=`security:changePassword:${userId}`
+  const value="true"
+  await REDIS_CLIENT.set(key,value,{EX:300})
   return res.status(400).json({
     success:true,
-    message:"The password was changed successfully"
+    message:"The OTP was verified you can now change password within 5 minutes"
   })
+}
 
+export const changeForgotPassword=async (req:Request,res:Response):Promise<Response>=>{
+  const userId=req.userId;
+  const [password,conformPassword]=req.body;
+  if(!password || !conformPassword){
+    return res.status(400).json({
+      success:false,
+      message:"Please provide both password and conformPassword"
+    })
+  }
+  const key=`security:changePassword:${userId}`
+  const value=await REDIS_CLIENT.get(key);
+  if(!value){
+    return res.status(400).json({
+      success:false,
+      message:"Request timeout please try again later"
+    })
+  }
+  if(password!=conformPassword){
+    return res.status(400).json({
+      success:false,
+      message:"The passwords didnt match"
+    })
+  }
+  const check=checkStrongPassword(password)
+  if(!check.isStrong){
+    return res.status(400).json({
+      success:false,
+      message:"Please put a stronger password"
+    })
+  }
+  const hashedPassword=await bcrypt.hash(password,10)
+  await pool.query(
+    `UPDATE users
+    SET password_hash=$1
+    WHERE id=$2`,
+    [hashedPassword,userId]
+  )
+  return res.status(400).json({
+    success:true,
+    message:"The password was changes successfully"
+  })
 }
