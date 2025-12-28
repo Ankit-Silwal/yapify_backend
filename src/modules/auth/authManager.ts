@@ -1,9 +1,22 @@
 import bcrypt from "bcrypt";
-import pool from "../../config/db";
-import checkStrongPassword from '../../utils/strongpassword'
+import type { Request, Response } from "express";
+import pool from "../../config/db.js";
+import { checkStrongPassword } from "../../utils/strongpassword.js";
+import { createSession } from "./sessionManager.js";
 
-export const registerUsers=async (req,res)=>{
-  const {email,password,conformPassword}=req.body;
+type checkPasswordResult={
+  isStrong:boolean,
+  errors:string[]
+}
+export const registerUsers = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { email, password, conformPassword } = req.body as {
+    email?: string;
+    password?: string;
+    conformPassword?: string;
+  };
   if(!email || !password || !conformPassword ){
     return res.status(400).json({
       success:false,
@@ -16,11 +29,11 @@ export const registerUsers=async (req,res)=>{
       message:"The passwords didn't match with each other"
     })
   }
-  const checkPassword=checkStrongPassword(password)
-  if(!checkPassword){
+  const checkPassword = checkStrongPassword(password);
+  if (!checkPassword.isStrong) {
     return res.status(400).json({
       success:false,
-      message:checkPassword.errors.join(",")
+      message: checkPassword.errors.join(",")
     })
   }
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -33,24 +46,29 @@ export const registerUsers=async (req,res)=>{
     `,
     [email, hashedPassword]
   );
-  res.status(201).json({
+  return res.status(201).json({
     success: true,
     data: result.rows[0]
   });
 
-} catch (err) {
+} catch (err:any) {
   if (err)
     return res.status(409).json({
       success: false,
       message: "Email already exists"
     });
   }
-
-  throw err;
+  return res.status(400).json({
+    success:false,
+    message:"Unexpected Error sire"
+  })
 }
 
-export const loginUser=async (req,res)=>{
-  const {email,password}=req.body;
+export const loginUser = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { email, password } = req.body as { email?: string; password?: string };
   if(!email || !password){
     return res.status(400).json({
       success:false,
@@ -69,6 +87,7 @@ export const loginUser=async (req,res)=>{
       message:"Invalid email or password "
     })
   }
+  const user=result.rows[0];
   const isMatch=await bcrypt.compare(password,user.password_hash);
   if(!isMatch){
     return res.status(400).json({
@@ -76,6 +95,13 @@ export const loginUser=async (req,res)=>{
       message:"The password didn't match"
     })
   }
+  const sessionId = await createSession(String(user.id), req);
+  res.cookie('sessionId',sessionId,{
+    httpOnly:true,
+    secure:process.env.NODE_ENV==="production",
+    sameSite:"strict",
+    maxAge:24*60*60*1000
+  })
   return res.status(200).json({
     success:true,
     message:"Successfully logged in:)",
