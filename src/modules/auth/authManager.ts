@@ -3,8 +3,9 @@ import type { Request, Response } from "express";
 import pool from "../../config/db.js";
 import { checkStrongPassword } from "../../utils/strongpassword.js";
 import { createSession } from "./sessionManager.js";
-import { sendRegisterMail } from "./sendingOtp.js";
-import { generateAndStoreOtp, verifyAndConsumeOtp } from "./otpManager.js";
+import { sendRegisterMail, forgotPasswordMail } from "./sendingOtp.js";
+import { generateAndStoreForgotPasswordOtp, generateAndStoreOtp, verifyAndConsumeForgotPasswordOtp, verifyAndConsumeOtp } from "./otpManager.js";
+
 type checkPasswordResult = {
   isStrong: boolean;
   errors: string[];
@@ -181,7 +182,7 @@ export async function changePassword(
   }
   const userId = req.userId;
   const result = await pool.query(
-    `SELECT id, email, hash_password
+    `SELECT id, email, password_hash
    FROM users
    WHERE id = $1`,
     [userId]
@@ -199,7 +200,7 @@ export async function changePassword(
       message:"The new passwords didnt match"
     })
   }
-  const isMatch=await bcrypt.compare(password,user.password_hash)
+  const isMatch=await bcrypt.compare(currentPassword,user.password_hash)
   if(!isMatch){
     return res.status(400).json({
       success:false,
@@ -208,7 +209,7 @@ export async function changePassword(
   }
   await pool.query(
     `UPDATE users
-    SET hash_password=$1,
+    SET password_hash=$1,
     updated_at=NOW()
     WHERE id=$2`,
     [password,userId]
@@ -217,4 +218,55 @@ export async function changePassword(
     success: true,
     message: "The Password was changed successfully",
   });
+}
+
+export const forgotPassword = async (req: Request, res: Response): Promise<Response> => {
+  const userId=req.userId;
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+  const otp=await generateAndStoreForgotPasswordOtp(userId);
+  const user=await pool.query(
+    `SELECT email,id FROM users
+    WHERE id=$1
+    RETURNING email`,
+    [userId]
+  )
+  await forgotPasswordMail({to:user.rows[0].email,otp});
+  return res.status(200).json({
+    success:true,
+    message:"The OTP was sent succesfully"
+  })  
+}
+
+export const verifyForgotPassword=async (req:Request,res:Response):Promise<Response>=>{
+  const otp=req.body;
+  const userId=req.userId;
+  if(!userId){
+    return res.status(400).json({
+      success:false,
+      message:"The user wasnt found"
+    })
+  }
+  if(!otp){
+    return res.status(400).json({
+      success:false,
+      message:"Please provide the required otp"
+    })
+  }
+  const response=await verifyAndConsumeForgotPasswordOtp(userId,otp)
+  if(!response.success){
+    return res.status(400).json({
+      success:false,
+      message:response.message
+    })
+  }
+  return res.status(400).json({
+    success:true,
+    message:"The password was changed successfully"
+  })
+
 }
