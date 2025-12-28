@@ -11,58 +11,80 @@ type checkPasswordResult={
 export const registerUsers = async (
   req: Request,
   res: Response
-): Promise<Response> => {
+): Promise<void> => {
   const { email, password, conformPassword } = req.body as {
     email?: string;
     password?: string;
     conformPassword?: string;
   };
-  if(!email || !password || !conformPassword ){
-    return res.status(400).json({
-      success:false,
-      message:"Please provide the all the required credentials as email,password and conformPassword"
-    })
+
+  if (!email || !password || !conformPassword) {
+    res.status(400).json({
+      success: false,
+      message: "Please provide email, password, and conformPassword"
+    });
+    return;
   }
-  if(password!==conformPassword){
-    return res.status(400).json({
-      success:false,
-      message:"The passwords didn't match with each other"
-    })
+
+  if (password !== conformPassword) {
+    res.status(400).json({
+      success: false,
+      message: "Passwords do not match"
+    });
+    return;
   }
-  const checkPassword = checkStrongPassword(password);
-  if (!checkPassword.isStrong) {
-    return res.status(400).json({
-      success:false,
-      message: checkPassword.errors.join(",")
-    })
+
+  const passwordCheck = checkStrongPassword(password);
+
+  if (!passwordCheck.isStrong) {
+    res.status(400).json({
+      success: false,
+      message: passwordCheck.errors.join(", ")
+    });
+    return;
+  }
+  const existingUserResult = await pool.query(
+    `
+    SELECT id, is_verified
+    FROM users
+    WHERE email = $1
+    `,
+    [email]
+  );
+
+  if (existingUserResult.rows.length > 0) {
+    const existingUser = existingUserResult.rows[0];
+    if (existingUser.is_verified) {
+      res.status(409).json({
+        success: false,
+        message: "User already exists"
+      });
+      return;
+    }
+
+    res.status(403).json({
+      success: false,
+      message: "Please verify your email before logging in"
+    });
+    return;
   }
   const hashedPassword = await bcrypt.hash(password, 10);
-  try {
   const result = await pool.query(
     `
-    INSERT INTO users (email, password_hash)
-    VALUES ($1, $2)
+    INSERT INTO users (email, password_hash, is_verified)
+    VALUES ($1, $2, false)
     RETURNING id, email
     `,
     [email, hashedPassword]
   );
-  return res.status(201).json({
+
+  res.status(201).json({
     success: true,
+    message: "Registration successful. Please verify your email.",
     data: result.rows[0]
   });
+};
 
-} catch (err:any) {
-  if (err)
-    return res.status(409).json({
-      success: false,
-      message: "Email already exists"
-    });
-  }
-  return res.status(400).json({
-    success:false,
-    message:"Unexpected Error sire"
-  })
-}
 
 export const loginUser = async (
   req: Request,
@@ -76,7 +98,7 @@ export const loginUser = async (
     })
   }
   const result=await pool.query(
-    `SELECT id,email,password_hash
+    `SELECT id,email,password_hash,is_verified
     FROM users
     WHERE email=$1`,
     [email]
@@ -93,6 +115,12 @@ export const loginUser = async (
     return res.status(400).json({
       success:false,
       message:"The password didn't match"
+    })
+  }
+  if(!user.is_verified){
+    return res.status(400).json({
+      success:false,
+      message:"This email isnt verified please verify this email"
     })
   }
   const sessionId = await createSession(String(user.id), req);
