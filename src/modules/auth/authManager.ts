@@ -4,13 +4,18 @@ import pool from "../../config/db.js";
 import { checkStrongPassword } from "../../utils/strongpassword.js";
 import { createSession } from "./sessionManager.js";
 import { sendRegisterMail, forgotPasswordMail } from "./sendingOtp.js";
-import { generateAndStoreForgotPasswordOtp, generateAndStoreOtp, verifyAndConsumeForgotPasswordOtp, verifyAndConsumeOtp } from "./otpManager.js";
+import {
+  generateAndStoreForgotPasswordOtp,
+  generateAndStoreOtp,
+  verifyAndConsumeForgotPasswordOtp,
+  verifyAndConsumeOtp,
+  resendOtp as refreshOtp,
+  verifyResentOtp as verifyResentOtpCode,
+  resendForgotPasswordOtp as refreshForgotPasswordOtp,
+  verifyResentForgotPasswordOtp as verifyResentForgotPasswordOtpCode,
+} from "./otpManager.js";
 import REDIS_CLIENT from "../../config/redis.js";
 
-type checkPasswordResult = {
-  isStrong: boolean;
-  errors: string[];
-};
 export const registerUsers = async (
   req: Request,
   res: Response
@@ -81,6 +86,109 @@ export const registerUsers = async (
   }
 };
 
+export async function verifyUser(
+  req: Request,
+  res: Response
+): Promise<Response> {
+  const { email, otp } = req.body;
+  if (!email || !otp) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide both email and the otp",
+    });
+  }
+  const user = await pool.query(
+    `SELECT id,email FROM users
+    WHERE email=$1`,
+    [email]
+  );
+  const response = await verifyAndConsumeOtp(user.rows[0].id, otp);
+  if (response.success) {
+    return res.status(200).json({
+      success: true,
+      message: "The Otp was verified",
+    });
+  }
+  if (!response.success) {
+    return res.status(400).json({
+      success: false,
+      message: response.message,
+    });
+  }
+  return res.status(400).json({
+    success: false,
+    message: "Unknown error",
+  });
+}
+
+export async function verifyResentOtp(
+  req: Request,
+  res: Response
+): Promise<Response> {
+  const { email, otp } = req.body as { email?: string; otp?: string };
+  if (!email || !otp) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide both email and the otp",
+    });
+  }
+  const user = await pool.query(
+    `SELECT id,email FROM users
+    WHERE email=$1`,
+    [email]
+  );
+  if (user.rows.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+  const response = await verifyResentOtpCode(user.rows[0].id, otp);
+  if (response.success) {
+    return res.status(200).json({
+      success: true,
+      message: "The Otp was verified",
+    });
+  }
+  return res.status(400).json({
+    success: false,
+    message: response.message,
+  });
+}
+
+export async function resendOtp(req:Request,res:Response):Promise<Response>{
+  const { email } = req.body as { email?: string };
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide the required email",
+    });
+  }
+  const user = await pool.query(
+    `SELECT id,email,is_verified FROM users
+    WHERE email=$1`,
+    [email]
+  );
+  if (user.rows.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+  if (user.rows[0].is_verified) {
+    return res.status(400).json({
+      success: false,
+      message: "Email already verified",
+    });
+  }
+  const otp = await refreshOtp(user.rows[0].id);
+  await sendRegisterMail({ to: email, otp });
+  return res.status(200).json({
+    success: true,
+    message: "The Resend Otp was sent",
+  });
+}
+
 export const loginUser = async (
   req: Request,
   res: Response
@@ -135,41 +243,6 @@ export const loginUser = async (
   });
 };
 
-export async function verifyUser(
-  req: Request,
-  res: Response
-): Promise<Response> {
-  const { email, otp } = req.body;
-  if (!email || !otp) {
-    return res.status(400).json({
-      success: false,
-      message: "Please provide both email and the otp",
-    });
-  }
-  const user = await pool.query(
-    `SELECT id,email FROM users
-    WHERE email=$1`,
-    [email]
-  );
-  const response = await verifyAndConsumeOtp(user.rows[0].id, otp);
-  if (response.success) {
-    return res.status(200).json({
-      success: true,
-      message: "The Otp was verified",
-    });
-  }
-  if (!response.success) {
-    return res.status(400).json({
-      success: false,
-      message: response.message,
-    });
-  }
-  return res.status(400).json({
-    success: false,
-    message: "Unknown error",
-  });
-}
-
 export async function changePassword(
   req: Request,
   res: Response
@@ -189,138 +262,235 @@ export async function changePassword(
     [userId]
   );
   const user = result.rows[0];
-  if(!user){
+  if (!user) {
     return res.status(400).json({
-      success:false,
-      message:"The user wasnt found in the database"
-    })
+      success: false,
+      message: "The user wasnt found in the database",
+    });
   }
-  if(password!=conformPassword){
+  if (password != conformPassword) {
     return res.status(400).json({
-      success:false,
-      message:"The new passwords didnt match"
-    })
+      success: false,
+      message: "The new passwords didnt match",
+    });
   }
-  const isMatch=await bcrypt.compare(currentPassword,user.password_hash)
-  if(!isMatch){
+  const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!isMatch) {
     return res.status(400).json({
-      success:false,
-      message:"Current password didn't match"
-    })
+      success: false,
+      message: "Current password didn't match",
+    });
   }
-  const check=checkStrongPassword(password)
-  if(!check.isStrong){
+  const check = checkStrongPassword(password);
+  if (!check.isStrong) {
     return res.status(400).json({
-      success:false,
-      message:"Please put a stronger password sir"
-    })
+      success: false,
+      message: "Please put a stronger password sir",
+    });
   }
-  const hashedPassword=await bcrypt.hash(password,10)
+  const hashedPassword = await bcrypt.hash(password, 10);
   await pool.query(
     `UPDATE users
     SET password_hash=$1,
     updated_at=NOW()
     WHERE id=$2`,
-    [hashedPassword,userId]
-  )
+    [hashedPassword, userId]
+  );
   return res.status(200).json({
     success: true,
     message: "The Password was changed successfully",
   });
 }
 
-export const forgotPassword = async (req: Request, res: Response): Promise<Response> => {
-  const userId=req.userId;
-  if (!userId) {
+export const forgotPassword = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { email } = req.body as { email?: string };
+  if (!email) {
     return res.status(400).json({
+      success: false,
+      message: "Please provide the required email",
+    });
+  }
+  const user = await pool.query(
+    `SELECT email,id FROM users
+    WHERE email=$1
+    RETURNING id`,
+    [email]
+  );
+  const otp = await generateAndStoreForgotPasswordOtp(user.rows[0].id);
+  await forgotPasswordMail({ to: email, otp });
+  return res.status(200).json({
+    success: true,
+    message: "The OTP was sent succesfully",
+  });
+};
+
+export const resendForgotPasswordOtp = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { email } = req.body as { email?: string };
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide the required email",
+    });
+  }
+  const user = await pool.query(
+    `SELECT email,id FROM users
+    WHERE email=$1
+    RETURNING id`,
+    [email]
+  );
+  if (user.rows.length === 0) {
+    return res.status(404).json({
       success: false,
       message: "User not found",
     });
   }
-  const otp=await generateAndStoreForgotPasswordOtp(userId);
-  const user=await pool.query(
-    `SELECT email,id FROM users
-    WHERE id=$1
-    RETURNING email`,
-    [userId]
-  )
-  await forgotPasswordMail({to:user.rows[0].email,otp});
+  const otp = await refreshForgotPasswordOtp(user.rows[0].id);
+  await forgotPasswordMail({ to: email, otp });
   return res.status(200).json({
-    success:true,
-    message:"The OTP was sent succesfully"
-  })  
-}
+    success: true,
+    message: "The OTP was sent succesfully",
+  });
+};
 
-export const verifyForgotPassword=async (req:Request,res:Response):Promise<Response>=>{
-  const otp=req.body;
-  const userId=req.userId;
-  if(!userId){
+export const verifyForgotPassword = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { email, otp } = req.body;
+  if (!otp) {
     return res.status(400).json({
-      success:false,
-      message:"The user wasnt found"
-    })
+      success: false,
+      message: "Please provide the required otp",
+    });
   }
-  if(!otp){
+  if (!email) {
     return res.status(400).json({
-      success:false,
-      message:"Please provide the required otp"
-    })
+      success: false,
+      message: "Please provide the required email",
+    });
   }
-  const response=await verifyAndConsumeForgotPasswordOtp(userId,otp)
-  if(!response.success){
+  const user = await pool.query(
+    `SELECT email,id FROM users
+    WHERE email=$1
+    RETURNING id`,
+    [email]
+  );
+  const response = await verifyAndConsumeForgotPasswordOtp(user.rows[0].id, otp);
+  if (!response.success) {
     return res.status(400).json({
-      success:false,
-      message:response.message
-    })
+      success: false,
+      message: response.message,
+    });
   }
-  const key=`security:changePassword:${userId}`
-  const value="true"
-  await REDIS_CLIENT.set(key,value,{EX:300})
-  return res.status(400).json({
-    success:true,
-    message:"The OTP was verified you can now change password within 5 minutes"
-  })
-}
+  const key = `security:changePassword:${user.rows[0].id}`;
+  const value = "true";
+  await REDIS_CLIENT.set(key, value, { EX: 300 });
+  return res.status(200).json({
+    success: true,
+    message:
+      "The OTP was verified you can now change password within 5 minutes",
+  });
+};
 
-export const changeForgotPassword=async (req:Request,res:Response):Promise<Response>=>{
-  const userId=req.userId;
-  const [password,conformPassword]=req.body;
-  if(!password || !conformPassword){
+export const verifyResentForgotPassword = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const { email, otp } = req.body as { email?: string; otp?: string };
+  if (!otp) {
     return res.status(400).json({
-      success:false,
-      message:"Please provide both password and conformPassword"
-    })
+      success: false,
+      message: "Please provide the required otp",
+    });
   }
-  const key=`security:changePassword:${userId}`
-  const value=await REDIS_CLIENT.get(key);
-  if(!value){
+  if (!email) {
     return res.status(400).json({
-      success:false,
-      message:"Request timeout please try again later"
-    })
+      success: false,
+      message: "Please provide the required email",
+    });
   }
-  if(password!=conformPassword){
+  const user = await pool.query(
+    `SELECT email,id FROM users
+    WHERE email=$1
+    RETURNING id`,
+    [email]
+  );
+  if (user.rows.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+  const response = await verifyResentForgotPasswordOtpCode(user.rows[0].id, otp);
+  if (!response.success) {
     return res.status(400).json({
-      success:false,
-      message:"The passwords didnt match"
-    })
+      success: false,
+      message: response.message,
+    });
   }
-  const check=checkStrongPassword(password)
-  if(!check.isStrong){
+  const key = `security:changePassword:${user.rows[0].id}`;
+  const value = "true";
+  await REDIS_CLIENT.set(key, value, { EX: 300 });
+  return res.status(200).json({
+    success: true,
+    message:
+      "The OTP was verified you can now change password within 5 minutes",
+  });
+};
+
+export const changeForgotPassword = async (
+  req: Request,
+  res: Response
+): Promise<Response> => {
+  const [email,password, conformPassword] = req.body;
+  if (!email || !password || !conformPassword) {
     return res.status(400).json({
-      success:false,
-      message:"Please put a stronger password"
-    })
+      success: false,
+      message: "Please provide email,password and the conformPassword all",
+    });
   }
-  const hashedPassword=await bcrypt.hash(password,10)
+  const user = await pool.query(
+    `SELECT email,id FROM users
+    WHERE email=$1
+    RETURNING id`,
+    [email]
+  );
+  const key = `security:changePassword:${user.rows[0].id}`;
+  const value = await REDIS_CLIENT.get(key);
+  if (!value) {
+    return res.status(400).json({
+      success: false,
+      message: "Request timeout please try again later",
+    });
+  }
+  if (password != conformPassword) {
+    return res.status(400).json({
+      success: false,
+      message: "The passwords didnt match",
+    });
+  }
+  const check = checkStrongPassword(password);
+  if (!check.isStrong) {
+    return res.status(400).json({
+      success: false,
+      message: "Please put a stronger password",
+    });
+  }
+  const hashedPassword = await bcrypt.hash(password, 10);
   await pool.query(
     `UPDATE users
     SET password_hash=$1
-    WHERE id=$2`,
-    [hashedPassword,userId]
-  )
+    WHERE email=$2`,
+    [hashedPassword, email]
+  );
   return res.status(400).json({
-    success:true,
-    message:"The password was changes successfully"
-  })
-}
+    success: true,
+    message: "The password was changed successfully",
+  });
+};

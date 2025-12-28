@@ -59,7 +59,7 @@ export async function verifyAndConsumeOtp(userId: string, submittedOtp: string):
 }
 
 export async function verifyAndConsumeForgotPasswordOtp(userId:string,submittedOtp:string):Promise<ApiResponse>{
-  const key=`verify:forogtPasswordOtp:${userId}`
+  const key=`verify:forgotPasswordOtp:${userId}`
   const stored=await REDIS_CLIENT.get(key)
   if(!stored){
     return({
@@ -78,4 +78,28 @@ export async function verifyAndConsumeForgotPasswordOtp(userId:string,submittedO
     success:true,
     message:"The Otp was verified"
   })
+}
+
+export async function resendOtp(userId: string): Promise<string> {
+  const key=`verify:otp:${userId}`
+  await REDIS_CLIENT.del(key)
+  const otp=generateOtp()
+  await REDIS_CLIENT.set(key,otp,{EX:OTP_TTL})
+  return otp
+}
+
+export async function verifyResentOtp(userId: string, submittedOtp: string): Promise<ApiResponse> {
+  return verifyAndConsumeOtp(userId, submittedOtp)
+}
+
+export async function resendForgotPasswordOtp(userId: string): Promise<string> {
+  const key=`verify:forgotPasswordOtp:${userId}`
+  await REDIS_CLIENT.del(key)
+  const otp=generateOtp()
+  await REDIS_CLIENT.set(key,otp,{EX:OTP_TTL})
+  return otp
+}
+
+export async function verifyResentForgotPasswordOtp(userId: string, submittedOtp: string): Promise<ApiResponse> {
+  return verifyAndConsumeForgotPasswordOtp(userId, submittedOtp)
 }
