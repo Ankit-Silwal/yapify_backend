@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import type { Request, Response } from "express";
 import pool from "../../config/db.js";
 import { checkStrongPassword } from "../../utils/strongpassword.js";
-import { createSession } from "./sessionManager.js";
+import { createSession, getAllSession as fetchAllSessions, removeSpecificSession as removeSessionById } from "./sessionManager.js";
 import { sendRegisterMail, forgotPasswordMail } from "./sendingOtp.js";
 import {
   generateAndStoreForgotPasswordOtp,
@@ -494,3 +494,34 @@ export const changeForgotPassword = async (
     message: "The password was changed successfully",
   });
 };
+
+export async function getAllSession(
+  req: Request,
+  res: Response
+): Promise<Response> {
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+  const sessions = await fetchAllSessions(userId);
+  return res.status(200).json({ success: true, sessions });
+}
+
+export async function removeSpecificSession(
+  req: Request,
+  res: Response
+): Promise<Response> {
+  const userId = req.userId;
+  const { sessionId } = req.params as { sessionId?: string };
+  if (!userId) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+  if (!sessionId) {
+    return res
+      .status(400)
+      .json({ success: false, message: "sessionId param is required" });
+  }
+  const result = await removeSessionById(userId, sessionId);
+  const status = result.success ? 200 : 404;
+  return res.status(status).json(result);
+}
