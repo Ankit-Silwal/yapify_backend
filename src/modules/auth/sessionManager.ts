@@ -55,7 +55,7 @@ export async function deleteSession(
   }
   return({
       success:false,
-      message:`Session doesnt exists `
+      message:`Session doesn't exists `
   })
 }  
 

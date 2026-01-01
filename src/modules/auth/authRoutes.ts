@@ -17,7 +17,6 @@ router.post('/resend-forgot-password-otp',resendForgotPasswordOtp)
 router.post('/verify-resend-forgot-password',verifyResentForgotPassword)
 router.post('/change-forgot-password',changeForgotPassword)
 
-// Session routes
 router.get('/sessions', checkSession, getAllSession)
 router.delete('/sessions/:sessionId', checkSession, removeSpecificSession)
 
