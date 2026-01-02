@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import type { Request, Response } from "express";
-import pool from "../../config/db.js";
+import prisma from "../../libs/prisma.js";
 import { checkStrongPassword } from "../../utils/strongpassword.js";
 import { createSession, getAllSession as fetchAllSessions, removeSpecificSession as removeSessionById } from "./sessionManager.js";
 import { sendRegisterMail, forgotPasswordMail } from "./sendingOtp.js";
@@ -55,22 +55,25 @@ export const registerUsers = async (
   const hashedPassword = await bcrypt.hash(password, 10);
 
   try {
-    const result = await pool.query(
-      `
-      INSERT INTO users (email, password_hash, is_verified)
-      VALUES ($1, $2, false)
-      RETURNING id, email
-      `,
-      [email, hashedPassword]
-    );
+    const user=await prisma.users.create({
+      data:{
+        email,
+        password_hash:hashedPassword,
+        is_verified:false,
+        is_deactivated:false
+      },select:{
+        id:true,
+        email:true
+      }
+    })
 
     res.status(201).json({
       success: true,
       message: "Registration successful. Please verify your email.",
-      data: result.rows[0],
+      data: user,
     });
-    const otp = await generateAndStoreOtp(result.rows[0].id);
-    await sendRegisterMail({ to: result.rows[0].email, otp });
+    const otp = await generateAndStoreOtp(user.id);
+    await sendRegisterMail({ to: user.email, otp });
   } catch (err: any) {
     if (err.code === "23505") {
       res.status(409).json({
@@ -97,12 +100,20 @@ export async function verifyUser(
       message: "Please provide both email and the otp",
     });
   }
-  const user = await pool.query(
-    `SELECT id,email FROM users
-    WHERE email=$1`,
-    [email]
-  );
-  const response = await verifyAndConsumeOtp(user.rows[0].id, otp);
+  const user=await prisma.users.findUnique({
+    where:{email},
+    select:{
+      id:true,
+      email:true
+    }
+  })
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+  const response = await verifyAndConsumeOtp(user.id, otp);
   if (response.success) {
     return res.status(200).json({
       success: true,
@@ -132,18 +143,17 @@ export async function verifyResentOtp(
       message: "Please provide both email and the otp",
     });
   }
-  const user = await pool.query(
-    `SELECT id,email FROM users
-    WHERE email=$1`,
-    [email]
-  );
-  if (user.rows.length === 0) {
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true, email: true },
+  });
+  if (!user) {
     return res.status(404).json({
       success: false,
       message: "User not found",
     });
   }
-  const response = await verifyResentOtpCode(user.rows[0].id, otp);
+  const response = await verifyResentOtpCode(user.id, otp);
   if (response.success) {
     return res.status(200).json({
       success: true,
@@ -164,24 +174,23 @@ export async function resendOtp(req:Request,res:Response):Promise<Response>{
       message: "Please provide the required email",
     });
   }
-  const user = await pool.query(
-    `SELECT id,email,is_verified FROM users
-    WHERE email=$1`,
-    [email]
-  );
-  if (user.rows.length === 0) {
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true, email: true, is_verified: true },
+  });
+  if (!user) {
     return res.status(404).json({
       success: false,
       message: "User not found",
     });
   }
-  if (user.rows[0].is_verified) {
+  if (user.is_verified) {
     return res.status(400).json({
       success: false,
       message: "Email already verified",
     });
   }
-  const otp = await refreshOtp(user.rows[0].id);
+  const otp = await refreshOtp(user.id);
   await sendRegisterMail({ to: email, otp });
   return res.status(200).json({
     success: true,
@@ -200,19 +209,16 @@ export const loginUser = async (
       message: "Please provide both the email and the password",
     });
   }
-  const result = await pool.query(
-    `SELECT id,email,password_hash,is_verified
-    FROM users
-    WHERE email=$1`,
-    [email]
-  );
-  if (result.rows.length === 0) {
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true, email: true, password_hash: true, is_verified: true },
+  });
+  if (!user) {
     return res.status(400).json({
       success: false,
       message: "Invalid email or password ",
     });
   }
-  const user = result.rows[0];
   const isMatch = await bcrypt.compare(password, user.password_hash);
   if (!isMatch) {
     return res.status(400).json({
@@ -255,13 +261,12 @@ export async function changePassword(
     });
   }
   const userId = req.userId;
-  const result = await pool.query(
-    `SELECT id, email, password_hash
-   FROM users
-   WHERE id = $1`,
-    [userId]
-  );
-  const user = result.rows[0];
+  const user = userId
+    ? await prisma.users.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, password_hash: true },
+      })
+    : null;
   if (!user) {
     return res.status(400).json({
       success: false,
@@ -289,13 +294,10 @@ export async function changePassword(
     });
   }
   const hashedPassword = await bcrypt.hash(password, 10);
-  await pool.query(
-    `UPDATE users
-    SET password_hash=$1,
-    updated_at=NOW()
-    WHERE id=$2`,
-    [hashedPassword, userId]
-  );
+  await prisma.users.update({
+    where: { id: userId },
+    data: { password_hash: hashedPassword },
+  });
   return res.status(200).json({
     success: true,
     message: "The Password was changed successfully",
@@ -313,13 +315,14 @@ export const forgotPassword = async (
       message: "Please provide the required email",
     });
   }
-  const user = await pool.query(
-    `SELECT email,id FROM users
-    WHERE email=$1
-    RETURNING id`,
-    [email]
-  );
-  const otp = await generateAndStoreForgotPasswordOtp(user.rows[0].id);
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+  const otp = await generateAndStoreForgotPasswordOtp(user.id);
   await forgotPasswordMail({ to: email, otp });
   return res.status(200).json({
     success: true,
@@ -338,19 +341,17 @@ export const resendForgotPasswordOtp = async (
       message: "Please provide the required email",
     });
   }
-  const user = await pool.query(
-    `SELECT email,id FROM users
-    WHERE email=$1
-    RETURNING id`,
-    [email]
-  );
-  if (user.rows.length === 0) {
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+  if (!user) {
     return res.status(404).json({
       success: false,
       message: "User not found",
     });
   }
-  const otp = await refreshForgotPasswordOtp(user.rows[0].id);
+  const otp = await refreshForgotPasswordOtp(user.id);
   await forgotPasswordMail({ to: email, otp });
   return res.status(200).json({
     success: true,
@@ -375,20 +376,21 @@ export const verifyForgotPassword = async (
       message: "Please provide the required email",
     });
   }
-  const user = await pool.query(
-    `SELECT email,id FROM users
-    WHERE email=$1
-    RETURNING id`,
-    [email]
-  );
-  const response = await verifyAndConsumeForgotPasswordOtp(user.rows[0].id, otp);
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+  const response = await verifyAndConsumeForgotPasswordOtp(user.id, otp);
   if (!response.success) {
     return res.status(400).json({
       success: false,
       message: response.message,
     });
   }
-  const key = `security:changePassword:${user.rows[0].id}`;
+  const key = `security:changePassword:${user.id}`;
   const value = "true";
   await REDIS_CLIENT.set(key, value, { EX: 300 });
   return res.status(200).json({
@@ -415,26 +417,24 @@ export const verifyResentForgotPassword = async (
       message: "Please provide the required email",
     });
   }
-  const user = await pool.query(
-    `SELECT email,id FROM users
-    WHERE email=$1
-    RETURNING id`,
-    [email]
-  );
-  if (user.rows.length === 0) {
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+  if (!user) {
     return res.status(404).json({
       success: false,
       message: "User not found",
     });
   }
-  const response = await verifyResentForgotPasswordOtpCode(user.rows[0].id, otp);
+  const response = await verifyResentForgotPasswordOtpCode(user.id, otp);
   if (!response.success) {
     return res.status(400).json({
       success: false,
       message: response.message,
     });
   }
-  const key = `security:changePassword:${user.rows[0].id}`;
+  const key = `security:changePassword:${user.id}`;
   const value = "true";
   await REDIS_CLIENT.set(key, value, { EX: 300 });
   return res.status(200).json({
@@ -448,20 +448,25 @@ export const changeForgotPassword = async (
   req: Request,
   res: Response
 ): Promise<Response> => {
-  const [email,password, conformPassword] = req.body;
+  const { email, password, conformPassword } = req.body as {
+    email?: string;
+    password?: string;
+    conformPassword?: string;
+  };
   if (!email || !password || !conformPassword) {
     return res.status(400).json({
       success: false,
       message: "Please provide email,password and the conformPassword all",
     });
   }
-  const user = await pool.query(
-    `SELECT email,id FROM users
-    WHERE email=$1
-    RETURNING id`,
-    [email]
-  );
-  const key = `security:changePassword:${user.rows[0].id}`;
+  const user = await prisma.users.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+  const key = `security:changePassword:${user.id}`;
   const value = await REDIS_CLIENT.get(key);
   if (!value) {
     return res.status(400).json({
@@ -483,13 +488,11 @@ export const changeForgotPassword = async (
     });
   }
   const hashedPassword = await bcrypt.hash(password, 10);
-  await pool.query(
-    `UPDATE users
-    SET password_hash=$1
-    WHERE email=$2`,
-    [hashedPassword, email]
-  );
-  return res.status(400).json({
+  await prisma.users.update({
+    where: { email },
+    data: { password_hash: hashedPassword },
+  });
+  return res.status(200).json({
     success: true,
     message: "The password was changed successfully",
   });
