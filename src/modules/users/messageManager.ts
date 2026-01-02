@@ -84,3 +84,12 @@ export async function fetchMessages(req:Request,res:Response):Promise<Response>{
     data:result.rows
   })
 }
+
+export async function fetchOneMessage(req:Request,res:Response):Promise<Response>{
+  const userId=req.body;
+  const result=await pool.query(`
+    SELECT content FROOM messages
+    WHERE (sender_id=$1 or receiver_id=$1)
+    order by created_at ASC;`,
+  [userId])
+}
