@@ -231,3 +231,40 @@ export async function loadMessage(req:Request,res:Response):Promise<Response>{
     })
   }
 }
+
+export async function markAsRead(req:Request,res:Response):Promise<Response>{
+  const {messageId}=req.body;
+  const userId=req.userId;
+  if(!messageId){
+    return res.status(400).json({
+      success:true,
+      message:"messageId is required"
+    })
+  }
+  try{
+    await pool.query(
+      `
+      update message_status ms
+      set status='read'
+      updated_at=now()
+      from messages m
+      where ms.message_id=m.id
+      and m.conversation_id=$1
+      and ms.user_id=$2
+      and ms.status!='read'
+      and m.sender_id!=$2
+      `,
+      [messageId,userId]
+    )
+    return res.status(200).json({
+      success:true,
+      message:"Status updated"
+    })
+  }catch(err){
+    return res.status(500).json({
+      success:false,
+      message:"Server error",
+      error:err instanceof Error?err.message:"Unknown error"
+    })
+  }
+}
