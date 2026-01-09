@@ -268,3 +268,128 @@ export async function markAsRead(req:Request,res:Response):Promise<Response>{
     })
   }
 }
+
+export async function openConversation(
+  req: Request,
+  res: Response
+): Promise<Response> {
+  const { otherUserId } = req.body;
+  const userId = req.userId;
+
+  if (!otherUserId || !userId) {
+    return res.status(400).json({
+      success: false,
+      message: "otherUserId required"
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // Check if conversation already exists
+    const existing = await client.query(
+      `
+      SELECT c.id
+      FROM conversations c
+      JOIN conversation_participants cp1
+        ON c.id = cp1.conversation_id
+      JOIN conversation_participants cp2
+        ON c.id = cp2.conversation_id
+      WHERE cp1.user_id = $1
+        AND cp2.user_id = $2
+        AND c.is_group = false
+      LIMIT 1;
+      `,
+      [userId, otherUserId]
+    );
+
+    let conversationId: string;
+
+    // If not exists → create it
+    if (existing.rowCount === 0) {
+      const convo = await client.query(
+        `
+        INSERT INTO conversations (is_group)
+        VALUES (false)
+        RETURNING id;
+        `
+      );
+      conversationId = convo.rows[0].id;
+      await client.query(
+        `
+        INSERT INTO conversation_participants (conversation_id, user_id)
+        VALUES ($1, $2), ($1, $3);
+        `,
+        [conversationId, userId, otherUserId]
+      );
+    } else {
+      conversationId = existing.rows[0].id;
+    }
+
+    await client.query("COMMIT");
+    return res.status(200).json({
+      success: true,
+      conversationId
+    });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("openConversation error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to open conversation"
+    });
+  } finally {
+    client.release();
+  }
+}
+
+export async function getUnreadCounts(
+  req: Request,
+  res: Response
+): Promise<Response> {
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized"
+    });
+  }
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        m.conversation_id,
+        COUNT(*) AS unread_count
+      FROM message_status ms
+      JOIN messages m
+        ON m.id = ms.message_id
+      JOIN conversation_participants cp
+        ON cp.conversation_id = m.conversation_id
+      WHERE ms.user_id = $1
+        AND ms.status != 'read'
+        AND m.sender_id != $1
+        AND cp.deleted_at IS NULL
+      GROUP BY m.conversation_id;
+      `,
+      [userId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:"Hence the number are retrived",
+      data: result.rows
+    });
+
+  } catch (err) {
+    console.error("getUnreadCounts error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get unread counts"
+    });
+  }
+}
