@@ -11,7 +11,9 @@ src/
 ├── config/        → db.ts, redis.ts, nodemailer.ts
 ├── middleware/    → checkSession.ts (session validation)
 ├── modules/
-│   └── auth/      → authManager.ts, authRoutes.ts, otpManager.ts, sessionManager.ts
+│   ├── auth/      → authManager.ts, authRoutes.ts, otpManager.ts, sessionManager.ts
+│   ├── users/     → messageManager.ts, messageRoutes.ts
+│   └── group/     → admin/, users/
 ├── utils/         → createOtp.ts, strongpassword.ts
 └── types/         → express.d.ts
 ```
@@ -36,12 +38,45 @@ SMTP_PASS=your_app_password
 ## Database Schema
 ```sql
 CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  is_verified BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  is_verified BOOLEAN DEFAULT false,
+  is_blocked BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  is_group BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE conversation_participants (
+  conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  deleted_at TIMESTAMPTZ,
+  joined_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE TABLE messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id UUID REFERENCES users(id),
+  content TEXT NOT NULL,
+  message_type VARCHAR(20) DEFAULT 'text',
+  deleted_for_sender BOOLEAN DEFAULT false,
+  deleted_for_everyone BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE message_status (
+  message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  status VARCHAR(10), -- sent, delivered, read
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (message_id, user_id)
 );
 ```
 
@@ -60,6 +95,19 @@ CREATE TABLE users (
 | GET | `/sessions` | ✅ | Get all sessions |
 | DELETE | `/sessions/:sessionId` | ✅ | Logout session |
 
+## API Endpoints (/api/message)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/send-message` | ✅ | Send message to user |
+| POST | `/delete-for-everyone` | ✅ | Delete message for all |
+| POST | `/delete-for-me` | ✅ | Delete message for sender |
+| POST | `/load-chat-list` | ✅ | Load conversation list |
+| POST | `/load-message` | ✅ | Load messages in conversation |
+| POST | `/mark-as-read` | ✅ | Mark messages as read |
+| POST | `/open-conversation` | ✅ | Open/create conversation |
+| POST | `/get-unread-count` | ✅ | Get unread message counts |
+
 ## Core Features
 
 ### Authentication Module (authManager.ts)
@@ -74,7 +122,17 @@ CREATE TABLE users (
 - Creates 32-byte hex session IDs
 - Stores in Redis with 24-hour TTL
 - Tracks IP, user agent, creation/expiry time
-- Support for multi-device login
+- SuMessaging Module (messageManager.ts)
+- **sendMessage**: Send text/media message to user (auto-creates conversation)
+- **deleteForMe**: Delete message for sender only
+- **deleteForEveryOne**: Delete message for all participants (sender only)
+- **loadChatList**: Get list of conversations with last message
+- **loadMessage**: Load all messages in a conversation
+- **markAsRead**: Mark messages as read (updates message_status)
+- **openConversation**: Create or get existing one-on-one conversation
+- **getUnreadCounts**: Get unread message count per conversation
+
+### pport for multi-device login
 
 ### OTP Manager (otpManager.ts)
 - Generates random 6-digit OTP (100000-999999)
@@ -123,7 +181,27 @@ curl -X POST http://localhost:5000/api/auth/register \
 **Verify OTP** (from email):
 ```bash
 curl -X POST http://localhost:5000/api/auth/verify \
+  -
+
+**Send Message**:
+```bash
+curl -X POST http://localhost:5000/api/message/send-message \
   -H "Content-Type: application/json" \
+  -H "Cookie: sessionId=your_session_id" \
+  -d '{
+    "receiverId": "uuid-of-receiver",
+    "content": "Hello!",
+    "messageType": "text"
+  }'
+```
+
+**Load Messages**:
+```bash
+curl -X POST http://localhost:5000/api/message/load-message \
+  -H "Content-Type: application/json" \
+  -H "Cookie: sessionId=your_session_id" \
+  -d '{"conversationId": "conversation-uuid"}'
+```H "Content-Type: application/json" \
   -d '{"email": "user@example.com", "otp": "123456"}'
 ```
 
