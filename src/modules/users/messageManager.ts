@@ -183,3 +183,51 @@ export async function loadChatList(req:Request,res:Response):Promise<Response>{
   }
 }
 
+export async function loadMessage(req:Request,res:Response):Promise<Response>{ 
+  const userId=req.userId;
+  const {conversationId}=req.body;
+  if(!conversationId || !userId){
+    return res.status(400).json({
+      success:false,
+      message:"ConversationId and userId are required"
+    })
+  }
+  try{
+    const results=await pool.query(
+      `
+      select 
+      m.id,
+      m.conversation_id,
+      m.sender_id,
+      m.message_type,
+      m.created_at,
+      case
+        when m.deleted_for_everyone=true
+        then "Message was deleted for everyone"
+        else
+          m.content
+        end as content
+        from messages m
+        join conversation_participants cp
+        on cp.conversation_id=m.conversation_id
+        where m.conversation_id=$1
+        and cp.user_id=$2
+        and cp.is_deleted is null
+        and m.deleted_for_sender =false
+        order by m.created_at asc;
+      `,
+      [conversationId,userId]
+    )
+    return res.status(200).json({
+      success:true,
+      message:"Hence the messages were retrieved",
+      data:results.rows
+    })
+  }catch(err){
+    return res.status(400).json({
+      success:true,
+      message:"There was error retiriveing the data",
+      error:err instanceof Error ? err.message : "Unknown error"
+    })
+  }
+}
