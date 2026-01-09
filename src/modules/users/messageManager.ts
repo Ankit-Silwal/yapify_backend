@@ -1,3 +1,4 @@
+
 import pool from "../../config/db.js";
 import type { Request, Response } from "express";
 
@@ -81,3 +82,104 @@ export async function sendMessage(
     client.release();
   }
 }
+
+export async function deleteForMe(req:Request,res:Response):Promise<Response>{
+  const userId=req.userId;
+  const {messageId}=req.body;
+  if(!messageId){
+    return res.status(400).json({
+      success:false,
+      message:"Please provide the messageId"
+    })
+  }
+  const result=await pool.query(
+    `
+    update messages
+    set deleted_for_sender=true
+    where id=$1 and sender_id=$2`,
+    [messageId,userId]
+  )
+  if(result.rowCount===0){
+    return res.status(400).json({
+      success:false,
+      message:"Not authorized to delete this message"
+    })
+  }
+  return res.status(200).json({
+    success:true,
+    message:"Hence the message was deleted for you"
+  })
+}
+
+export async function deleteForEveryOne(req:Request,res:Response):Promise<Response>{
+  const userId=req.userId;
+  const {messageId}=req.body;
+  if(!messageId){
+    return res.status(400).json({
+      success:false,
+      message:"Please provide the message Id"
+    })
+  }
+  const result=await pool.query(`
+    update messages
+    set deleted_for_everyone=true
+    where id=$1 and sender_id=$2`,
+  [messageId,userId])
+  if(result.rowCount===0){
+    return res.status(400).json({
+      success:false,
+      message:"You arent authorized for the given action"
+    })
+  }
+
+  return res.status(200).json({
+    success:true,
+    message:"The message was succusfully deleted now"
+  })
+}
+
+export async function loadChatList(req:Request,res:Response):Promise<Response>{
+  const userId=req.userId;
+
+  if(!userId){
+    return res.status(400).json({
+      success:false,
+      message:"Unauthorized"
+    })
+  }
+  try{
+    const result=await pool.query(
+      `
+      select * from (
+      select distinct on (m.conversation_id)
+      m.conversation_id,
+      m.id as message_id,
+      m.content,
+      m.sender_id,
+      m.message_type,
+      m.created_at
+      from conversation participants cp
+      join messages m
+      on m.conversation_id=cp.cp.conversation_id
+      where cp.user_id=$1
+      and cp.deleted_at is null
+      order by m.conversation_id,m.created_at desc)
+      t 
+      order by created_at desc;
+      )`,
+      [userId]
+    )
+    return res.status(200).json({
+      success:true,
+      message:"All the messages were retrived",
+      data:result.rows
+    })
+  }catch(err){
+    return res.status(400).json({
+      success:false,
+      message:"There was an error on that process",
+      error:err instanceof Error ? err.message : "Unknown error"
+    })
+  }
+}
+
