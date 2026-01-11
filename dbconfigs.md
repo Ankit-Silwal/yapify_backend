@@ -20,6 +20,7 @@ CREATE TABLE conversation_participants (
   user_id UUID
     REFERENCES users(id) ON DELETE CASCADE,
 
+  role TEXT DEFAULT 'member',
   deleted_at TIMESTAMPTZ,
   joined_at TIMESTAMPTZ DEFAULT now(),
 
@@ -38,6 +39,9 @@ CREATE TABLE messages (
   content TEXT NOT NULL,
   message_type VARCHAR(20) DEFAULT 'text',
 
+  deleted_for_sender BOOLEAN DEFAULT false,
+  deleted_for_everyone BOOLEAN DEFAULT false,
+
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -48,7 +52,7 @@ CREATE TABLE message_status (
   user_id UUID
     REFERENCES users(id) ON DELETE CASCADE,
 
-  status VARCHAR(10), -- sent, delivered, read
+  status VARCHAR(10),
   updated_at TIMESTAMPTZ DEFAULT now(),
 
   PRIMARY KEY (message_id, user_id)
