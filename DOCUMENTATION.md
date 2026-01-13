@@ -108,6 +108,17 @@ CREATE TABLE message_status (
 | POST | `/open-conversation` | ✅ | Open/create conversation |
 | POST | `/get-unread-count` | ✅ | Get unread message counts |
 
+## API Endpoints (/api/group)
+
+| Method | Endpoint | Auth | Description | Body Parameters |
+|--------|----------|------|-------------|-----------------|
+| POST | `/create-group` | ✅ | Create a new group | `memberIds: string[]` |
+| POST | `/remove-from-group` | ✅ | Remove user from group (Admin only) | `conversationId: string`, `userIdToRemove: string` |
+| POST | `/give-admin` | ✅ | Promote member to admin | `conversationId: string`, `otherUserId: string` |
+| POST | `/leave-group` | ✅ | Leave a group | `conversationId: string` |
+| POST | `/kick-from-group` | ✅ | Kick a user (owner/admin actions) | `conversationId: string`, `otherUserId: string` |
+| POST | `/addMember` | ✅ | Add member to group (Admin only) | `conversationId: string`, `memberId: string` |
+
 ## Core Features
 
 ### Authentication Module (authManager.ts)

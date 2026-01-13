@@ -87,7 +87,7 @@ export async function removeFromGroup(req:Request,res:Response):Promise<Response
     `
     select role
     from conversation_participants
-    where id=$1
+    where conversation_id=$1
     and user_id=$2;
     `,
     [conversationId,userId]
@@ -145,7 +145,7 @@ export async function giveAdmin(req:Request,res:Response):Promise<Response>{
   const result=await pool.query(
     `
     update conversation_participants
-    set role="admin"
+    set role='admin'
     where conversation_id=$1
     and user_id=$2;
     `,
@@ -165,7 +165,7 @@ export async function giveAdmin(req:Request,res:Response):Promise<Response>{
 
 export async function leaveGroup(req:Request,res:Response):Promise<Response>{
   const userId=req.userId;
-  const conversationId=req.body;
+  const { conversationId } = req.body;
   //checking if the conversation have only a admin if let not process it
   if(!conversationId){
     return res.status(400).json({
@@ -187,7 +187,7 @@ export async function leaveGroup(req:Request,res:Response):Promise<Response>{
   }
   const leaveResult=await pool.query(`
     delete from conversation_participants
-    where conversation_id=$1,
+    where conversation_id=$1
     and user_id=$2;
     `,[conversationId,userId])
   if(leaveResult.rowCount==0){
@@ -265,5 +265,44 @@ export async function kickFromGroup(req:Request,res:Response):Promise<Response>{
     success:true,
     message:"Successfully kicked the member from the group"
   })
-
 }
+
+export async function addMember(req:Request,res:Response):Promise<Response>{
+    const {memberId,conversationId}=req.body;
+    const userId=req.userId;
+    if(!memberId || !conversationId){
+      return res.status(400).json({
+        success:false,
+        message:"memberId and conversationId are required"
+      })
+    }
+    const checkAdmin=await pool.query(
+      `
+      select role from conversation_participants
+      where conversation_id=$1
+      and user_id=$2;
+      `,
+      [conversationId,userId]
+    )
+    if(checkAdmin.rowCount==0){
+      return res.status(400).json({
+        success:false,
+        message:"You arent part of this group"
+      })
+    }
+    if(checkAdmin.rows[0].role!='admin'){
+      return res.status(400).json({
+        success:false,
+        message:"Only admin are authorized for this task"
+      })
+    }
+    await pool.query(`
+      insert into conversation_participants (conversation_id,user_id, role)
+      values ($1,$2, 'member');
+      `,[conversationId,memberId]
+    );
+    return res.status(200).json({
+      success:true,
+      message:"The user was added"
+    })
+  }
