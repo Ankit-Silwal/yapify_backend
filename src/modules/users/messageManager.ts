@@ -1,95 +1,27 @@
 import pool from "../../config/db.js";
 import type { Request, Response } from "express";
+import { createMessage } from "./messageService.ts";
 
-export async function sendMessage(
-  req: Request,
-  res: Response
-): Promise<Response> {
-  const { conversationId, content, messageType = "text" } = req.body;
-  const senderId = req.userId;
-
-  if (!conversationId || !senderId || !content) {
-    return res.status(400).json({
-      success: false,
-      message: "conversationId, senderId and content are required"
-    });
-  }
-
-  const client = await pool.connect();
+export async function sendMessage(req: Request, res: Response)
+{
   try {
-    await client.query("BEGIN");
-
-    //checking if the conversation already exists for any of the users
-    const memberCheck = await client.query(
-      `
-      select 1 from conversation_participants
-      where conversation_id=$1
-      and user_id=$2
-      and deleted_at is null
-      `,
-      [conversationId, senderId]
+    const { conversationId, content, messageType } = req.body;
+    const senderId = req.userId!;
+    const message = await createMessage(
+      senderId,
+      conversationId,
+      content,
+      messageType
     );
 
-    if (memberCheck.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized"
-      });
-    }
+    return res.json({ success:true, data:message });
 
-    const messages = await client.query(
-      `
-      insert into messages (conversation_id,sender_id,content,message_type)
-      values ($1,$2,$3,$4)
-      returning *
-      `,
-      [conversationId, senderId, content, messageType]
-    );
+  } catch(err:any){
 
-    const participants = await client.query(
-      `
-      select user_id from conversation_participants
-      where conversation_id=$1
-      and deleted_at is null
-      `,
-      [conversationId]
-    );
+    if(err.message === "NOT_MEMBER")
+      return res.status(403).json({ success:false, message:"Not authorized" });
 
-    for (const row of participants.rows) {
-      await client.query(
-        `
-        insert into message_status (message_id,user_id,status)
-        values ($1,$2,$3)
-        `,
-        [
-          messages.rows[0].id,
-          row.user_id,
-          row.user_id === senderId ? "read" : "sent"
-        ]
-      );
-    }
-
-    await client.query("COMMIT");
-
-    return res.status(200).json({
-      success: true,
-      message: "The message was sent",
-      data: {
-        conversationId,
-        data: messages.rows[0]
-      }
-    });
-
-  } catch (err) {
-    await client.query("ROLLBACK");
-    return res.status(500).json({
-      success: false,
-      message: "Failed to send the message",
-      error: err instanceof Error ? err.message : "Unknown error"
-    });
-  } finally {
-    client.release();
+    return res.status(500).json({ success:false });
   }
 }
 

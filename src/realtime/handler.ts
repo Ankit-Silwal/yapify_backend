@@ -1,5 +1,5 @@
 import { Server, Socket } from "socket.io";
-import socketAuth from "./auth";
+import socketAuth from "./auth.ts";
 
 export default function registerHandlers(io: Server)
 {
