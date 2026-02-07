@@ -41,7 +41,6 @@ export default function registerHandlers(io: Server)
           messageId: message.id
         });
 
-        // 2 SEND TO ALL IN CONVERSATION
         io.to(payload.conversationId).emit("message:new", message);
       }
       catch(err:any)

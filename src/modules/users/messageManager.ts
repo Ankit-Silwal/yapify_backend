@@ -29,7 +29,7 @@ export async function deleteForMe(
   req: Request,
   res: Response
 ): Promise<Response> {
-  const userId = req.userId;
+  const userId = req.userId!;
   const { messageId } = req.body;
 
   if (!messageId) {
@@ -66,7 +66,7 @@ export async function deleteForEveryOne(
   req: Request,
   res: Response
 ): Promise<Response> {
-  const userId = req.userId;
+  const userId = req.userId!;
   const { messageId } = req.body;
 
   if (!messageId) {
@@ -103,14 +103,7 @@ export async function loadChatList(
   req: Request,
   res: Response
 ): Promise<Response> {
-  const userId = req.userId;
-
-  if (!userId) {
-    return res.status(400).json({
-      success: false,
-      message: "Unauthorized"
-    });
-  }
+  const userId = req.userId!;
 
   try {
     const result = await pool.query(
@@ -155,7 +148,7 @@ export async function loadMessage(
   req: Request,
   res: Response
 ): Promise<Response> {
-  const userId = req.userId;
+  const userId = req.userId!;
   const { conversationId } = req.body;
 
   if (!conversationId || !userId) {
@@ -202,124 +195,15 @@ export async function loadMessage(
 
   } catch (err) {
     return res.status(400).json({
-      success: true,
-      message: "There was error retiriveing the data",
-      error: err instanceof Error ? err.message : "Unknown error"
-    });
-  }
-}
-
-export async function markAsRead(
-  req: Request,
-  res: Response
-): Promise<Response> {
-  const { conversationId } = req.body;
-  const userId = req.userId;
-
-  if (!conversationId) {
-    return res.status(400).json({
-      success: true,
-      message: "conversationId is required"
-    });
-  }
-
-  try {
-    await pool.query(
-      `
-      update message_status ms
-      set status='read',
-          updated_at=now()
-      from messages m
-      where ms.message_id=m.id
-      and m.conversation_id=$1
-      and ms.user_id=$2
-      and ms.status!='read'
-      and m.sender_id!=$2
-      `,
-      [conversationId, userId]
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Status updated"
-    });
-
-  } catch (err) {
-    return res.status(500).json({
       success: false,
-      message: "Server error",
-      error: err instanceof Error ? err.message : "Unknown error"
-    });
-  }
-}
-
-export async function openConversation(req:Request, res:Response): Promise<Response> {
-  const userId = req.userId;
-  const { receiverId } = req.body;
-
-  if(!receiverId){
-     return res.status(400).json({
-      success:false,
-      message: "receiverId is required"
-     });
-  }
-
-  try {
-    // Check for existing 1-on-1 conversation
-    const result = await pool.query(`
-      SELECT c.id
-      FROM conversations c
-      JOIN conversation_participants cp1 ON c.id = cp1.conversation_id
-      JOIN conversation_participants cp2 ON c.id = cp2.conversation_id
-      WHERE c.is_group = false
-      AND cp1.user_id = $1
-      AND cp2.user_id = $2
-    `, [userId, receiverId]);
-
-    if(result.rowCount && result.rowCount > 0){
-      return res.status(200).json({
-        success:true,
-        conversationId: result.rows[0].id
-      });
-    }
-
-    // Create new conversation
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const convoResult = await client.query(`
-        INSERT INTO conversations (is_group) VALUES (false) RETURNING id
-      `);
-      const convoId = convoResult.rows[0].id;
-
-      await client.query(`
-        INSERT INTO conversation_participants (conversation_id, user_id)
-        VALUES ($1, $2), ($1, $3)
-      `, [convoId, userId, receiverId]);
-
-      await client.query("COMMIT");
-      return res.status(200).json({
-        success:true,
-        conversationId: convoId
-      });
-    } catch(err){
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
-
-  } catch(err) {
-     return res.status(500).json({
-      success: false,
-      message: "Server error",
+      message: "There was error retrieving the data",
       error: err instanceof Error ? err.message : "Unknown error"
     });
   }
 }
 
 export async function getUnreadCounts(req:Request, res:Response): Promise<Response> {
-  const userId = req.userId;
+  const userId = req.userId!;
   try {
      const result = await pool.query(`
       SELECT m.conversation_id, COUNT(*) as unread_count
