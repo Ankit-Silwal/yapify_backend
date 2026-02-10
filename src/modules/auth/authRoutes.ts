@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { registerUsers, verifyUser ,loginUser,forgotPassword, verifyForgotPassword, changeForgotPassword, changePassword, resendOtp, verifyResentOtp, resendForgotPasswordOtp, verifyResentForgotPassword, getAllSession, removeSpecificSession } from "./authManager.js";
+import { registerUsers, verifyUser ,loginUser,forgotPassword, verifyForgotPassword, changeForgotPassword, changePassword, resendOtp, verifyResentOtp, resendForgotPasswordOtp, verifyResentForgotPassword, getAllSession, removeSpecificSession, getMe } from "./authManager.js";
 import { checkSession } from "../../middleware/checkSession.js";
 const router=Router();
 
+router.get('/me', checkSession, getMe);
 router.post('/login',loginUser)
 router.post('/register',registerUsers)
 router.post('/verify',verifyUser);

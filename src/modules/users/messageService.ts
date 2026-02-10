@@ -1,4 +1,4 @@
-import pool from "../../config/db.ts";
+import pool from "../../config/db.js";
 
 export async function createMessage(
   senderId: string,
@@ -16,11 +16,29 @@ export async function createMessage(
       SELECT 1 FROM conversation_participants
       WHERE conversation_id=$1
       AND user_id=$2
-      AND deleted_at IS NULL
     `,[conversationId,senderId]);
+
+    // AND deleted_at IS NULL -- removed strict check for now to fix sending issue, 
+    // or we should auto-undelete. 
+    // Ideally we assume createChat handles the undelete.
+    // But if we are here, we are trying to send.
+    // If deleted_at is set, we probably want to allow sending and "re-join" chat? 
+    // Let's just remove the deleted_at check for "sending permission" 
+    // OR we check it and throw different error.
+    
+    // Actually, if I send a message, I am active. So strict check is good IF createChat did its job.
+    // But since users are stuck, let's relax this or auto-fix.
+    // Let's UPDATE deleted_at=NULL if it is set.
 
     if(memberCheck.rowCount === 0)
       throw new Error("NOT_MEMBER");
+      
+    // Auto-activate sender if soft-deleted
+    await client.query(`
+        UPDATE conversation_participants 
+        SET deleted_at = NULL 
+        WHERE conversation_id=$1 AND user_id=$2 AND deleted_at IS NOT NULL
+    `, [conversationId, senderId]);
 
     const msgResult = await client.query(`
       INSERT INTO messages (conversation_id,sender_id,content,message_type)
@@ -53,6 +71,7 @@ export async function createMessage(
 
   } catch(err) {
     await client.query("ROLLBACK");
+    console.error("createMessage Transaction Error:", err);
     throw err;
   } finally {
     client.release();

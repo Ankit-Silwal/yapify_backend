@@ -19,15 +19,24 @@ export default function registerHandlers(io: Server)
       AND deleted_at IS NULL
     `,[userId]);
 
+    // Join user-specific room for notifications
+    socket.join(userId);
+
     result.rows.forEach(row =>
     {
       socket.join(row.conversation_id);
+    });
+
+    socket.on("conversation:join", (conversationId) => {
+        console.log(`User ${userId} joining conversation ${conversationId}`);
+        socket.join(conversationId);
     });
 
     socket.on("message:send", async (payload) =>
     {
       try
       {
+        console.log(`Received message from ${userId}:`, payload);
         const message = await createMessage(
           userId,
           payload.conversationId,
@@ -45,6 +54,7 @@ export default function registerHandlers(io: Server)
       }
       catch(err:any)
       {
+        console.error("Message Send Error:", err);
         socket.emit("message:error", {
           tempId: payload.tempId,
           message: err.message

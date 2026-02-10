@@ -1,12 +1,17 @@
 import pool from "../../config/db.js";
 import type { Request, Response } from "express";
-import { createMessage, markConversationRead } from "./messageService.ts";
+import { createMessage, markConversationRead } from "./messageService.js";
 import { getIo } from "../../realtime/io.js";
 
 export async function sendMessage(req: Request, res: Response)
 {
   try {
     const { conversationId, content, messageType } = req.body;
+    
+    if (!conversationId || !content) {
+      return res.status(400).json({ success: false, message: "conversationId and content are required" });
+    }
+
     const senderId = req.userId!;
     const message = await createMessage(
       senderId,
@@ -15,14 +20,20 @@ export async function sendMessage(req: Request, res: Response)
       messageType
     );
 
+    const io = getIo();
+    if(io) {
+        io.to(conversationId).emit("message:new", message);
+    }
+
     return res.json({ success:true, data:message });
 
   } catch(err:any){
+    console.error("sendMessage Error:", err);
 
     if(err.message === "NOT_MEMBER")
       return res.status(403).json({ success:false, message:"Not authorized" });
 
-    return res.status(500).json({ success:false });
+    return res.status(500).json({ success:false, message: err.message || "Server Error" });
   }
 }
 
@@ -278,6 +289,12 @@ export async function createChat(req: Request, res: Response) {
 
     if (existing.rowCount && existing.rowCount > 0) {
         conversationId = existing.rows[0].id;
+        // Ensure participants are active (undelete if necessary)
+        await pool.query(`
+            UPDATE conversation_participants 
+            SET deleted_at = NULL 
+            WHERE conversation_id = $1 AND user_id IN ($2, $3)
+        `, [conversationId, userId, partnerId]);
     } else {
         const client = await pool.connect();
         try {
@@ -294,8 +311,28 @@ export async function createChat(req: Request, res: Response) {
         }
     }
 
-    const userRes = await pool.query("SELECT email FROM users WHERE id = $1", [partnerId]);
-    const partnerEmail = userRes.rows[0]?.email || 'User';
+    const userRes = await pool.query("SELECT email, username FROM users WHERE id = $1", [partnerId]);
+    const partnerData = userRes.rows[0];
+    const partnerName = partnerData?.username || partnerData?.email || 'User';
+
+    // Notify connected sockets of the new conversation
+    const io = getIo();
+    if (io) {
+        // Emit to both users to join the new room immediately
+        // We can send the FULL conversation object so the frontend can add it to the list
+        // and join the room.
+        const newConvoEvent = {
+            conversation_id: conversationId,
+            partnerId: partnerId, // For sender
+            initiatorId: userId,
+            is_group: false
+        };
+        
+        // Notify Sender
+        io.to(userId).emit("conversation:new", { ...newConvoEvent, partnerId: partnerId });
+        // Notify Recipient
+        io.to(partnerId).emit("conversation:new", { ...newConvoEvent, partnerId: userId });
+    }
 
     // Return compatible with ConversationItem
     return res.status(200).json({
@@ -305,7 +342,9 @@ export async function createChat(req: Request, res: Response) {
         sender_id: userId,
         message_type: 'system',
         created_at: new Date().toISOString(),
-        name: partnerEmail,
+        name: partnerName,
+        username: partnerData?.username,
+        email: partnerData?.email,
         is_group: false
     });
 

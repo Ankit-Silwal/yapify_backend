@@ -57,6 +57,7 @@ CREATE TABLE conversations (
 CREATE TABLE conversation_participants (
   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  role VARCHAR(20) DEFAULT 'member', -- admin, member
   deleted_at TIMESTAMPTZ,
   joined_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (conversation_id, user_id)
