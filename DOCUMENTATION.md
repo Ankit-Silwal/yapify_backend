@@ -14,6 +14,7 @@ src/
 │   ├── auth/      → authManager.ts, authRoutes.ts, otpManager.ts, sessionManager.ts
 │   ├── users/     → messageManager.ts, messageRoutes.ts
 │   └── group/     → admin/, users/
+├── realtime/      → auth.ts, handler.ts, io.ts
 ├── utils/         → createOtp.ts, strongpassword.ts
 └── types/         → express.d.ts
 ```
@@ -119,6 +120,26 @@ CREATE TABLE message_status (
 | POST | `/kick-from-group` | ✅ | Kick a user (owner/admin actions) | `conversationId: string`, `otherUserId: string` |
 | POST | `/addMember` | ✅ | Add member to group (Admin only) | `conversationId: string`, `memberId: string` |
 
+## Realtime (Socket.IO)
+
+### Connection
+- **Auth**: Authenticates via `cookie` (sessionId) automatically on connection.
+- **Rooms**: Automatically joins `conversationId` rooms for all active chats.
+
+### Client -> Server Events
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `message:send` | `{ conversationId, content, messageType, tempId }` | Send a new message |
+| `conversation:markRead` | `{ conversationId }` | Mark conversation as read |
+
+### Server -> Client Events
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `message:new` | Message Object | Received when a new message is sent to the room |
+| `message:ack` | `{ tempId, messageId }` | Acknowledgment to sender that message is saved |
+| `message:error` | `{ tempId, message }` | Error during sending |
+| `conversation:read` | `{ conversationId, userId, readAt }` | Notify that a user read the conversation |
+
 ## Core Features
 
 ### Authentication Module (authManager.ts)
@@ -133,7 +154,9 @@ CREATE TABLE message_status (
 - Creates 32-byte hex session IDs
 - Stores in Redis with 24-hour TTL
 - Tracks IP, user agent, creation/expiry time
-- SuMessaging Module (messageManager.ts)
+- Support for multi-device login
+
+### Messaging Module (messageManager.ts)
 - **sendMessage**: Send text/media message to user (auto-creates conversation)
 - **deleteForMe**: Delete message for sender only
 - **deleteForEveryOne**: Delete message for all participants (sender only)
@@ -142,8 +165,6 @@ CREATE TABLE message_status (
 - **markAsRead**: Mark messages as read (updates message_status)
 - **openConversation**: Create or get existing one-on-one conversation
 - **getUnreadCounts**: Get unread message count per conversation
-
-### pport for multi-device login
 
 ### OTP Manager (otpManager.ts)
 - Generates random 6-digit OTP (100000-999999)
