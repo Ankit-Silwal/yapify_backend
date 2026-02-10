@@ -41,6 +41,7 @@ SMTP_PASS=your_app_password
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
+  username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   is_verified BOOLEAN DEFAULT false,
   is_blocked BOOLEAN DEFAULT false,
@@ -85,7 +86,7 @@ CREATE TABLE message_status (
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/register` | ❌ | Register user |
+| POST | `/register` | ❌ | Register user (requires email, username, password) |
 | POST | `/verify` | ❌ | Verify email with OTP |
 | POST | `/login` | ❌ | Login |
 | POST | `/change-password` | ✅ | Change password |
@@ -95,6 +96,13 @@ CREATE TABLE message_status (
 | POST | `/resend-otp` | ❌ | Resend verification OTP |
 | GET | `/sessions` | ✅ | Get all sessions |
 | DELETE | `/sessions/:sessionId` | ✅ | Logout session |
+
+## API Endpoints (/api/users)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/search` | ✅ | Search for users by email partial match |
+| GET | `/find-user` | ✅ | Find users by username partial match |
 
 ## API Endpoints (/api/message)
 
@@ -197,6 +205,31 @@ CREATE TABLE message_status (
 ✅ Email verification required
 ✅ Session TTL management
 
+## Authentication & Sessions
+This project uses **HTTP-Only Cookies** for session management, ensuring that session identifiers are not accessible via client-side JavaScript, which protects against XSS attacks.
+
+### How it works:
+1.  **Login**: When a user logs in successfully via `/api/auth/login`, the server generates a unique `sessionId` (32-byte hex string) using `createSession`.
+2.  **Cookie Set**: The server responds with a `Set-Cookie` header.
+    *   **Name**: `sessionId`
+    *   **Value**: `<session_id>`
+    *   **HttpOnly**: `true` (Cannot be accessed by `document.cookie`)
+    *   **Secure**: `true` (HTTPS only, enabled in production)
+    *   **SameSite**: `Strict` (Prevents CSRF)
+    *   **Max-Age**: 24 hours
+3.  **Storage**: The session data (user ID, IP, user agent) is stored in **Redis** with a 24-hour expiration.
+4.  **Verification**: For protected routes (e.g., `/api/message/*`, `/api/user/*`), the request must include this cookie. The `checkSession` middleware:
+    *   Reads `sessionId` from `req.cookies`.
+    *   Checks if it exists in Redis.
+    *   If valid, attaches `userId` to `req` and allows the request.
+    *   If invalid/missing, returns `401 Unauthorized`.
+5.  **Logout**: Calling `DELETE /api/auth/sessions/:sessionId` removes the session from Redis.
+
+### Frontend Implementation
+Since the cookie is `HttpOnly`, the frontend **does not** need to manually store the token.
+*   **Browser**: Automatically attaches the cookie to every subsequent request to the API domain.
+*   **CORS**: Ensure `withCredentials: true` is set in your HTTP client (e.g., Axios/Fetch) so cookies are sent/received.
+
 ## Quick Example
 
 **Register**:
@@ -205,6 +238,7 @@ curl -X POST http://localhost:5000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
+    "username": "user123",
     "password": "SecurePass123!",
     "conformPassword": "SecurePass123!"
   }'

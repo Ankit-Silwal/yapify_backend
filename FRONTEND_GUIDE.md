@@ -35,6 +35,7 @@ Based on the backend schema, these are the key TypeScript interfaces you'll need
 interface User {
   id: string;
   email: string;
+  username: string;
   is_verified: boolean;
 }
 
@@ -74,7 +75,7 @@ interface SocketMessagePayload {
     *   `/verify-otp` (Used after register or forgot password)
     *   `/` (Protected Dashboard)
 2.  **Registration Flow**:
-    *   User fills Email/Pass -> Call `/auth/register`.
+    *   User fills Email/Username/Pass -> Call `/auth/register`.
     *   Redirect to OTP page.
     *   User enters OTP -> Call `/auth/verify`.
     *   Redirect to Login.
@@ -92,12 +93,15 @@ interface SocketMessagePayload {
     *   Connect to `http://localhost:5000` **only after** login.
     *   The backend automatically reads the cookie to authenticate the socket.
 
-### Phase 3: Active Conversation & Messaging
-1.  **Chat Window (Right Panel)**:
-    *   When user clicks a Sidebar item:
-        *   Set `activeConversationId`.
-        *   Call `/message/load-message` with `{ conversationId }`.
-        *   Scroll to bottom.
+### Phase 4: Search & New Chat
+1.  **Find User**:
+    *   Create a "New Chat" modal or page.
+    *   Input: `username`.
+    *   Call `/users/find-user?username=...` to search for users.
+    *   Display results.
+2.  **Start Chat**:
+    *   Clicking a user from results should open the chat window with empty history (or existing history if available).
+
 2.  **Sending Messages**:
     *   User types -> Press Send.
     *   **Optimistic UI**: Append message immediately to list with `status: 'pending'`.

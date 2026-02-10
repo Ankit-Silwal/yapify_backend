@@ -254,3 +254,63 @@ export async function markAsRead(req: Request, res: Response) {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 }
+
+export async function createChat(req: Request, res: Response) {
+  try {
+    const userId = req.userId!;
+    const { partnerId } = req.body;
+
+    if (!partnerId) {
+      return res.status(400).json({ success: false, message: "Partner ID required" });
+    }
+
+    // Check existing
+    const existing = await pool.query(`
+       SELECT c.id 
+       FROM conversations c
+       JOIN conversation_participants cp1 ON c.id = cp1.conversation_id
+       JOIN conversation_participants cp2 ON c.id = cp2.conversation_id
+       WHERE cp1.user_id = $1 AND cp2.user_id = $2 AND c.is_group = false
+       LIMIT 1
+    `, [userId, partnerId]);
+
+    let conversationId: string;
+
+    if (existing.rowCount && existing.rowCount > 0) {
+        conversationId = existing.rows[0].id;
+    } else {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const resConv = await client.query("INSERT INTO conversations (is_group) VALUES (false) RETURNING id");
+            conversationId = resConv.rows[0].id;
+            await client.query("INSERT INTO conversation_participants (conversation_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member')", [conversationId, userId, partnerId]);
+            await client.query('COMMIT');
+        } catch(e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
+
+    const userRes = await pool.query("SELECT email FROM users WHERE id = $1", [partnerId]);
+    const partnerEmail = userRes.rows[0]?.email || 'User';
+
+    // Return compatible with ConversationItem
+    return res.status(200).json({
+        conversation_id: conversationId,
+        message_id: 'START-' + Date.now(),
+        content: 'Start a conversation',
+        sender_id: userId,
+        message_type: 'system',
+        created_at: new Date().toISOString(),
+        name: partnerEmail,
+        is_group: false
+    });
+
+  } catch (err: any) {
+      console.error(err);
+      return res.status(500).json({ success: false, message: err.message });
+  }
+}

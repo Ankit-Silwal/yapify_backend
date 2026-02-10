@@ -20,16 +20,17 @@ export const registerUsers = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  const { email, password, conformPassword } = req.body as {
+  const { email, username, password, conformPassword } = req.body as {
     email?: string;
+    username?: string;
     password?: string;
     conformPassword?: string;
   };
 
-  if (!email || !password || !conformPassword) {
+  if (!email || !username || !password || !conformPassword) {
     res.status(400).json({
       success: false,
-      message: "Please provide email, password, and conformPassword",
+      message: "Please provide email, username, password, and conformPassword",
     });
     return;
   }
@@ -57,11 +58,11 @@ export const registerUsers = async (
   try {
     const result = await pool.query(
       `
-      INSERT INTO users (email, password_hash, is_verified)
-      VALUES ($1, $2, false)
-      RETURNING id, email
+      INSERT INTO users (email, username, password_hash, is_verified)
+      VALUES ($1, $2, $3, false)
+      RETURNING id, email, username
       `,
-      [email, hashedPassword]
+      [email, username, hashedPassword]
     );
 
     res.status(201).json({
@@ -73,9 +74,16 @@ export const registerUsers = async (
     await sendRegisterMail({ to: result.rows[0].email, otp });
   } catch (err: any) {
     if (err.code === "23505") {
+      const detail = err.detail || "";
+      let message = "Email or Username already exists";
+      if (detail.includes("email")) {
+        message = "Email already exists";
+      } else if (detail.includes("username")) {
+        message = "Username already exists";
+      }
       res.status(409).json({
         success: false,
-        message: "Email already exists",
+        message: message,
       });
     } else {
       res.status(500).json({
@@ -201,7 +209,7 @@ export const loginUser = async (
     });
   }
   const result = await pool.query(
-    `SELECT id,email,password_hash,is_verified
+    `SELECT id,email,username,password_hash,is_verified
     FROM users
     WHERE email=$1`,
     [email]
@@ -239,6 +247,7 @@ export const loginUser = async (
     user: {
       id: user.id,
       email: user.email,
+      username: user.username
     },
   });
 };

@@ -6,7 +6,8 @@ import { sendMessage,
   loadChatList,
   loadMessage,
   getUnreadCounts,
-  markAsRead } from "./messageManager.js";
+  markAsRead, 
+  createChat } from "./messageManager.js";
 const router=Router()
 
 router.post('/send-message',checkSession,sendMessage);
@@ -16,5 +17,6 @@ router.post('/load-chat-list',checkSession,loadChatList)
 router.post('/load-message',checkSession,loadMessage);
 router.post('/get-unread-count',checkSession,getUnreadCounts);
 router.post('/mark-as-read',checkSession,markAsRead);
+router.post('/create-chat', checkSession, createChat);
 
 export default router;
