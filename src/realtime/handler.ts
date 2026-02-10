@@ -1,6 +1,6 @@
 import { Server, Socket } from "socket.io";
 import socketAuth from "./auth.ts";
-import { createMessage } from "../modules/users/messageService.ts";
+import { createMessage, markConversationRead } from "../modules/users/messageService.ts";
 import pool from "../config/db.ts";
 
 export default function registerHandlers(io: Server)
@@ -49,6 +49,19 @@ export default function registerHandlers(io: Server)
           tempId: payload.tempId,
           message: err.message
         });
+      }
+    });
+
+    socket.on("conversation:markRead", async (payload) => {
+      try {
+        await markConversationRead(userId, payload.conversationId);
+        io.to(payload.conversationId).emit("conversation:read", {
+          conversationId: payload.conversationId,
+          userId,
+          readAt: new Date()
+        });
+      } catch (err) {
+        console.error("Error marking read via socket:", err);
       }
     });
 

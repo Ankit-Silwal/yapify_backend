@@ -5,7 +5,8 @@ import { sendMessage,
   deleteForMe,
   loadChatList,
   loadMessage,
-  getUnreadCounts } from "./messageManager.js";
+  getUnreadCounts,
+  markAsRead } from "./messageManager.js";
 const router=Router()
 
 router.post('/send-message',checkSession,sendMessage);
@@ -14,5 +15,6 @@ router.post('/delete-for-me',checkSession,deleteForMe)
 router.post('/load-chat-list',checkSession,loadChatList)
 router.post('/load-message',checkSession,loadMessage);
 router.post('/get-unread-count',checkSession,getUnreadCounts);
+router.post('/mark-as-read',checkSession,markAsRead);
 
 export default router;

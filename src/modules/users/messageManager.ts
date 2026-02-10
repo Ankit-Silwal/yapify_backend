@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import type { Request, Response } from "express";
-import { createMessage } from "./messageService.ts";
+import { createMessage, markConversationRead } from "./messageService.ts";
+import { getIo } from "../../realtime/io.js";
 
 export async function sendMessage(req: Request, res: Response)
 {
@@ -224,5 +225,32 @@ export async function getUnreadCounts(req:Request, res:Response): Promise<Respon
       message: "Server error",
       error: err instanceof Error ? err.message : "Unknown error"
     });
+  }
+}
+
+export async function markAsRead(req: Request, res: Response) {
+  const userId = req.userId!;
+  const { conversationId } = req.body;
+
+  if (!conversationId) {
+    return res.status(400).json({ success: false, message: "ConversationId is required" });
+  }
+
+  try {
+    await markConversationRead(userId, conversationId);
+    
+    // Notify realtime users
+    const io = getIo();
+    if (io) {
+      io.to(conversationId).emit("conversation:read", {
+        conversationId,
+        userId,
+        readAt: new Date() 
+      });
+    }
+
+    return res.json({ success: true, message: "Marked as read" });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 }
