@@ -218,6 +218,12 @@ export async function resendOtp(req:Request,res:Response):Promise<Response>{
   });
 }
 
+// Test accounts configuration
+const TEST_ACCOUNTS = [
+  { username: "test1", email: "test1@gmail.com", password: "password", id: 999991 },
+  { username: "test2", email: "test2@gmail.com", password: "password", id: 999992 }
+];
+
 export const loginUser = async (
   req: Request,
   res: Response
@@ -227,6 +233,27 @@ export const loginUser = async (
     return res.status(400).json({
       success: false,
       message: "Please provide both the email and the password",
+    });
+  }
+  
+  // Check if it's a test account
+  const testAccount = TEST_ACCOUNTS.find(acc => acc.email === email || acc.username === email);
+  if (testAccount?.password === password) {
+    const sessionId = await createSession(String(testAccount.id), req);
+    res.cookie("sessionId", sessionId, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      maxAge: 24 * 60 * 60 * 1000,
+    });
+    return res.status(200).json({
+      success: true,
+      message: "Successfully logged in (TEST ACCOUNT):)",
+      user: {
+        id: testAccount.id,
+        email: testAccount.email,
+        username: testAccount.username
+      },
     });
   }
   const result = await pool.query(
